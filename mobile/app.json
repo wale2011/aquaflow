@@ -41,9 +41,17 @@
     ],
     "scheme": "aquaflow",
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "your-eas-project-id"
+        "projectId": "08b33eae-dcb4-473c-aa2d-5870ffc227d4"
       }
+    },
+    "owner": "aktheraja01",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/08b33eae-dcb4-473c-aa2d-5870ffc227d4"
     }
   }
 }
