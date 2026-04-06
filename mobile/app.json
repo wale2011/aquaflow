@@ -14,10 +14,10 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.aquaflow.lagos",
-      "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "AquaFlow needs your location to find nearby water tanker drivers.",
-        "NSLocationAlwaysUsageDescription": "AquaFlow uses your location to track deliveries."
+        "NSLocationAlwaysUsageDescription": "AquaFlow uses your location to track deliveries.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
