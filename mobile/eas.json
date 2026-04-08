@@ -15,7 +15,8 @@
     },
     "ios_preview": {
       "channel": "preview",
-      "distribution": "store"
+      "distribution": "store",
+      "autoIncrement": true
     },
     "production": {
       "autoIncrement": true,
@@ -23,6 +24,11 @@
     }
   },
   "submit": {
+    "ios_preview": {
+      "ios": {
+        "ascAppId": "6761734581"
+      }
+    },
     "production": {}
   }
 }
