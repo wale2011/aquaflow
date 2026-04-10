@@ -1,18 +1,43 @@
-// Node.js v22.5+ has a built-in sqlite module - no native compilation needed!
-const { DatabaseSync } = require('node:sqlite');
-const path = require('path');
+const { Pool } = require('pg');
 
-const dbPath = process.env.DB_PATH || './aquaflow.db';
+const databaseUrl = process.env.DATABASE_URL;
 
-const db = new DatabaseSync(dbPath);
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is required for AquaFlow backend (PostgreSQL migration)');
+}
 
-// Enable WAL mode and foreign keys
-db.exec('PRAGMA journal_mode = WAL');
-db.exec('PRAGMA foreign_keys = ON');
+const useSsl = process.env.PGSSLMODE === 'require' || process.env.PGSSL === 'true';
 
-function initializeDatabase() {
-  db.exec(`
-    -- Users table (both clients and drivers)
+const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl: useSsl ? { rejectUnauthorized: false } : false,
+});
+
+let initialized = false;
+
+async function query(text, params = []) {
+  return pool.query(text, params);
+}
+
+async function withTransaction(work) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function initializeDatabase() {
+  if (initialized) return;
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -24,33 +49,31 @@ function initializeDatabase() {
       address TEXT,
       lga TEXT,
       state TEXT DEFAULT 'Lagos',
-      is_active INTEGER DEFAULT 1,
-      is_verified INTEGER DEFAULT 0,
+      is_active BOOLEAN DEFAULT TRUE,
+      is_verified BOOLEAN DEFAULT FALSE,
       push_token TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-    -- Driver profiles (extended info for drivers)
     CREATE TABLE IF NOT EXISTS driver_profiles (
       id TEXT PRIMARY KEY,
       user_id TEXT UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       tanker_capacity INTEGER NOT NULL DEFAULT 10000,
       tanker_plate TEXT,
       tanker_type TEXT DEFAULT 'standard',
-      price_per_trip REAL NOT NULL DEFAULT 3000,
-      service_areas TEXT NOT NULL DEFAULT '[]',
+      price_per_trip DOUBLE PRECISION NOT NULL DEFAULT 3000,
+      service_areas JSONB NOT NULL DEFAULT '[]'::jsonb,
       bio TEXT,
       years_experience INTEGER DEFAULT 0,
       total_deliveries INTEGER DEFAULT 0,
-      rating_sum REAL DEFAULT 0,
+      rating_sum DOUBLE PRECISION DEFAULT 0,
       rating_count INTEGER DEFAULT 0,
-      is_available INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      is_available BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-    -- Driver availability slots
     CREATE TABLE IF NOT EXISTS availability_slots (
       id TEXT PRIMARY KEY,
       driver_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -58,11 +81,10 @@ function initializeDatabase() {
       start_time TEXT NOT NULL,
       end_time TEXT NOT NULL,
       max_bookings INTEGER DEFAULT 3,
-      is_active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now'))
+      is_active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-    -- Subscriptions (recurring delivery plans)
     CREATE TABLE IF NOT EXISTS subscriptions (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -73,16 +95,15 @@ function initializeDatabase() {
       delivery_address TEXT NOT NULL,
       lga TEXT NOT NULL,
       quantity_litres INTEGER NOT NULL DEFAULT 10000,
-      price_per_delivery REAL NOT NULL,
+      price_per_delivery DOUBLE PRECISION NOT NULL,
       total_deliveries INTEGER DEFAULT 0,
       status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paused', 'cancelled')),
       next_delivery_date TEXT,
       notes TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-    -- Bookings (individual delivery requests)
     CREATE TABLE IF NOT EXISTS bookings (
       id TEXT PRIMARY KEY,
       client_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -94,7 +115,7 @@ function initializeDatabase() {
       delivery_address TEXT NOT NULL,
       lga TEXT NOT NULL,
       quantity_litres INTEGER NOT NULL DEFAULT 10000,
-      price REAL NOT NULL,
+      price DOUBLE PRECISION NOT NULL,
       status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'confirmed', 'en_route', 'delivered', 'cancelled', 'failed')),
       payment_status TEXT DEFAULT 'pending' CHECK(payment_status IN ('pending', 'paid', 'refunded')),
       payment_method TEXT DEFAULT 'cash' CHECK(payment_method IN ('cash', 'transfer', 'card')),
@@ -103,23 +124,21 @@ function initializeDatabase() {
       rating INTEGER CHECK(rating BETWEEN 1 AND 5),
       review TEXT,
       completed_at TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-    -- Notifications
     CREATE TABLE IF NOT EXISTS notifications (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       title TEXT NOT NULL,
       body TEXT NOT NULL,
       type TEXT NOT NULL,
-      data TEXT DEFAULT '{}',
-      is_read INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now'))
+      data JSONB DEFAULT '{}'::jsonb,
+      is_read BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-    -- Reviews
     CREATE TABLE IF NOT EXISTS reviews (
       id TEXT PRIMARY KEY,
       booking_id TEXT UNIQUE NOT NULL REFERENCES bookings(id),
@@ -127,10 +146,9 @@ function initializeDatabase() {
       driver_id TEXT NOT NULL REFERENCES users(id),
       rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
       comment TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
-    -- Indexes for performance
     CREATE INDEX IF NOT EXISTS idx_bookings_client ON bookings(client_id);
     CREATE INDEX IF NOT EXISTS idx_bookings_driver ON bookings(driver_id);
     CREATE INDEX IF NOT EXISTS idx_bookings_date ON bookings(scheduled_date);
@@ -140,9 +158,13 @@ function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
   `);
 
-  console.log('✅ Database initialized successfully');
+  initialized = true;
+  console.log('✅ PostgreSQL database initialized successfully');
 }
 
-initializeDatabase();
-
-module.exports = db;
+module.exports = {
+  pool,
+  query,
+  withTransaction,
+  initializeDatabase,
+};

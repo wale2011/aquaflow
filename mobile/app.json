@@ -17,10 +17,7 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "AquaFlow needs your location to find nearby water tanker drivers.",
         "NSLocationAlwaysUsageDescription": "AquaFlow uses your location to track deliveries.",
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": true
-        }
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

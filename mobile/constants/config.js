@@ -1,9 +1,11 @@
-// AquaFlow Production API - AWS Server
-// NOTE: Port 80 must be open in AWS Security Group (launch-wizard-1)
-// To open it: AWS Console → EC2 → Security Groups → launch-wizard-1 → Inbound rules
-// Add: HTTP port 80 from 0.0.0.0/0
+// AquaFlow API endpoint
+// Priority:
+// 1) EXPO_PUBLIC_API_BASE_URL from EAS profile/environment
+// 2) Secure fallback endpoint (trusted Let's Encrypt cert)
+const RAW_API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL || 'https://api.3.136.193.228.sslip.io/api';
 
-export const API_BASE_URL = 'http://3.145.208.89/api';
+export const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '');
 
 export const LAGOS_LGAS = [
   'Agege', 'Ajeromi-Ifelodun', 'Alimosho', 'Amuwo-Odofin', 'Apapa',

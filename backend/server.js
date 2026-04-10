@@ -5,9 +5,13 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Trust first reverse proxy hop (nginx) so rate limiting and IP handling work correctly
+app.set('trust proxy', 1);
 
 // ─── Security Middleware ─────────────────────────────────────────────────────
 app.use(helmet());
@@ -93,8 +97,12 @@ app.use((err, req, res, next) => {
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`
+async function start() {
+  try {
+    await db.initializeDatabase();
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`
 ╔══════════════════════════════════════════╗
 ║         💧 AquaFlow API Server           ║
 ║                                          ║
@@ -102,7 +110,14 @@ app.listen(PORT, '0.0.0.0', () => {
 ║  Health: http://localhost:${PORT}/api/health║
 ║  Env:    ${(process.env.NODE_ENV || 'development').padEnd(32)}║
 ╚══════════════════════════════════════════╝
-  `);
-});
+      `);
+    });
+  } catch (err) {
+    console.error('❌ Failed to initialize database:', err);
+    process.exit(1);
+  }
+}
+
+start();
 
 module.exports = app;

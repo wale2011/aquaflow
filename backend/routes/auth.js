@@ -9,6 +9,19 @@ const { validate } = require('../middleware/validate');
 
 const router = express.Router();
 
+function normalizeServiceAreas(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 // Lagos LGAs for validation
 const LAGOS_LGAS = [
   'Agege','Ajeromi-Ifelodun','Alimosho','Amuwo-Odofin','Apapa',
@@ -31,38 +44,42 @@ router.post('/register', [
   try {
     const { name, email, phone, password, role, address, lga } = req.body;
 
-    const existingEmail = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existingEmail) {
+    const existingEmailResult = await db.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
+    if (existingEmailResult.rowCount > 0) {
       return res.status(409).json({ success: false, message: 'Email already registered' });
     }
 
-    const existingPhone = db.prepare('SELECT id FROM users WHERE phone = ?').get(phone);
-    if (existingPhone) {
+    const existingPhoneResult = await db.query('SELECT id FROM users WHERE phone = $1 LIMIT 1', [phone]);
+    if (existingPhoneResult.rowCount > 0) {
       return res.status(409).json({ success: false, message: 'Phone number already registered' });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
     const userId = uuidv4();
 
-    db.prepare(`
+    await db.query(`
       INSERT INTO users (id, name, email, phone, password_hash, role, address, lga, state)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Lagos')
-    `).run(userId, name, email, phone, passwordHash, role, address, lga);
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Lagos')
+    `, [userId, name, email, phone, passwordHash, role, address, lga]);
 
     // Create driver profile if registering as driver
     if (role === 'driver') {
       const { tanker_capacity = 10000, price_per_trip = 3000, service_areas = [] } = req.body;
-      db.prepare(`
+      await db.query(`
         INSERT INTO driver_profiles (id, user_id, tanker_capacity, price_per_trip, service_areas)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(uuidv4(), userId, tanker_capacity, price_per_trip, JSON.stringify(service_areas));
+        VALUES ($1, $2, $3, $4, $5::jsonb)
+      `, [uuidv4(), userId, tanker_capacity, price_per_trip, JSON.stringify(service_areas)]);
     }
 
     const token = jwt.sign({ userId, role }, process.env.JWT_SECRET, {
       expiresIn: process.env.JWT_EXPIRES_IN || '7d'
     });
 
-    const user = db.prepare('SELECT id, name, email, phone, role, address, lga, state, created_at FROM users WHERE id = ?').get(userId);
+    const userResult = await db.query(
+      'SELECT id, name, email, phone, role, address, lga, state, created_at FROM users WHERE id = $1',
+      [userId]
+    );
+    const user = userResult.rows[0];
 
     res.status(201).json({
       success: true,
@@ -85,7 +102,8 @@ router.post('/login', [
   try {
     const { email, password } = req.body;
 
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    const userResult = await db.query('SELECT * FROM users WHERE email = $1 LIMIT 1', [email]);
+    const user = userResult.rows[0];
     if (!user) {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
@@ -107,8 +125,9 @@ router.post('/login', [
 
     let profile = null;
     if (user.role === 'driver') {
-      profile = db.prepare('SELECT * FROM driver_profiles WHERE user_id = ?').get(user.id);
-      if (profile) profile.service_areas = JSON.parse(profile.service_areas || '[]');
+      const profileResult = await db.query('SELECT * FROM driver_profiles WHERE user_id = $1', [user.id]);
+      profile = profileResult.rows[0] || null;
+      if (profile) profile.service_areas = normalizeServiceAreas(profile.service_areas);
     }
 
     res.json({
@@ -136,17 +155,23 @@ router.post('/login', [
 });
 
 // GET /api/auth/me
-router.get('/me', authenticate, (req, res) => {
+router.get('/me', authenticate, async (req, res) => {
   try {
-    const user = db.prepare(`
+    const userResult = await db.query(`
       SELECT id, name, email, phone, role, address, lga, state, profile_image, is_verified, push_token, created_at
-      FROM users WHERE id = ?
-    `).get(req.user.id);
+      FROM users WHERE id = $1
+    `, [req.user.id]);
+    const user = userResult.rows[0];
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
 
     let profile = null;
     if (user.role === 'driver') {
-      profile = db.prepare('SELECT * FROM driver_profiles WHERE user_id = ?').get(user.id);
-      if (profile) profile.service_areas = JSON.parse(profile.service_areas || '[]');
+      const profileResult = await db.query('SELECT * FROM driver_profiles WHERE user_id = $1', [user.id]);
+      profile = profileResult.rows[0] || null;
+      if (profile) profile.service_areas = normalizeServiceAreas(profile.service_areas);
     }
 
     res.json({ success: true, user: { ...user, profile } });
@@ -159,9 +184,9 @@ router.get('/me', authenticate, (req, res) => {
 router.put('/push-token', authenticate, [
   body('push_token').notEmpty().withMessage('Push token required'),
   validate
-], (req, res) => {
+], async (req, res) => {
   try {
-    db.prepare('UPDATE users SET push_token = ? WHERE id = ?').run(req.body.push_token, req.user.id);
+    await db.query('UPDATE users SET push_token = $1, updated_at = NOW() WHERE id = $2', [req.body.push_token, req.user.id]);
     res.json({ success: true, message: 'Push token updated' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Failed to update push token' });

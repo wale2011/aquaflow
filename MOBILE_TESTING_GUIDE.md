@@ -33,7 +33,7 @@ Your API is running on the server but port 80 is blocked. Fix it:
    - Source: **Anywhere-IPv4** (0.0.0.0/0)
 7. Click **"Save rules"**
 
-Test it worked: open http://3.145.208.89/api/health in your browser. You should see JSON.
+Test it worked: open http://3.131.201.220/api/health in your browser. You should see JSON.
 
 ---
 
@@ -95,7 +95,7 @@ Use these test accounts:
 
 **App can't connect to server:**
 - Make sure port 80 is open in AWS (Step 2)
-- Check http://3.145.208.89/api/health in your browser first
+- Check http://3.131.201.220/api/health in your browser first
 
 **QR code not scanning:**
 - Make sure your phone and computer are on the same WiFi
